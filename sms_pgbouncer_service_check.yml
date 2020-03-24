@@ -1,0 +1,61 @@
+---
+  - hosts: all
+    become: true
+    gather_facts: no
+
+    pre_tasks:
+      - name: Verifying ansible_limit
+        assert:
+          that: ansible_limit != ""
+          fail_msg: "'limit' should not be blank"
+          success_msg: "'limit' is {{ ansible_limit }}"
+
+    tasks:
+      - name: slack excecution
+        include_role:
+          name: slack_notifications
+          tasks_from: excecution
+        vars:
+          playbook: "{{ playbook_name }}"
+          aws_token: "{{ lookup ('aws_secret', 'prod/devops/awx') }}"
+
+      - name: pgbouncer service check
+        block:
+          - name: pgbouncer_status
+            include_role:
+              name: status_check
+              tasks_from: service_check
+            vars:
+              role_service_name: pgbouncer
+        rescue:
+          - name: Restart pgbouncer
+            include_role:
+              name: service_restart
+              tasks_from: restart
+            vars:
+              role_service_name: pgbouncer
+
+          - name: Check pgbouncer status
+            block:
+              - name: pgbouncer_status
+                include_role:
+                  name: status_check
+                  tasks_from: service_check
+                vars:
+                  role_service_name: pgbouncer
+                register: result
+            rescue:
+              - name: Pagerduty escalation
+                include_role:
+                  name: pd_alerts
+                  tasks_from: pd_voice
+                vars:
+                  alert_name: "{{ alert }}"
+
+      - name: slack completion
+        include_role:
+          name: slack_notifications
+          tasks_from: completion
+        vars:
+          playbook: "{{ playbook_name }}"
+...
