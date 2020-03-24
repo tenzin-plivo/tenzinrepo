@@ -1,0 +1,49 @@
+---
+ - hosts: all
+   become: true
+   vars:
+    playbook_name: "Clear-cache-and-restart-pcap-uploader"
+    
+   pre_tasks:
+     - name: Verifying ansible_limit
+       assert:
+         that: ansible_limit != ""
+         fail_msg: "'limit' should not be blank"
+         success_msg: "'limit' is {{ ansible_limit }}"
+
+   tasks:
+   - name: slack excecution
+     include_role:
+       name: slack_notifications
+       tasks_from: execution
+     vars:
+       playbook: "{{ playbook_name }}"
+  
+
+   - name: inbound_outboundsips status
+     block: 
+        - name: clear cache
+          shell: echo 2 > /proc/sys/vm/drop_caches 
+          vars:
+            role_service_name: inbound_outboundsips
+
+        - name: restart pcap_uploader
+          shell: pm2 restart pcap_uploader
+          vars:
+            role_service_name: inbound_outboundsips
+
+      rescue:
+        - name: Pagerduty escalation
+          include_role:
+            name: pd_alerts
+            tasks_from: pd_noc
+          vars:
+            alert_name: "{{ alert }}"
+
+    - name: slack completion
+      include_role:
+        name: slack_notifications
+        tasks_from: completion
+      vars:
+        playbook: "{{ playbook_name }}"
+...
