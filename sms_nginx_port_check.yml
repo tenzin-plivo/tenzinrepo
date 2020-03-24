@@ -1,0 +1,66 @@
+---
+ - hosts: all
+   become: yes
+   gather_facts: true
+   vars:
+     playbook_name: "test-sms-nginx-port-check"
+     alert: "sms_nginx_port_check"
+
+   pre_tasks:
+     - name: Verifying ansible_limit
+       assert:
+         that: ansible_limit != ""
+         fail_msg: "'limit' should not be blank"
+         success_msg: "'limit' is {{ ansible_limit }}"
+
+   tasks:
+   - name: slack excecution
+     include_role:
+       name: slack_notifications
+       tasks_from: excecution
+     vars:
+       playbook: "{{ playbook_name }}"
+
+   - name: Restart Nginx if not running
+     block:
+      - name: Check Nginx port status
+        include_role:
+         name: status_check
+         tasks_from: port_check
+        vars:
+         port: "{{ item }}"
+        with_items:
+         - 8000
+
+     rescue:
+      - name: Restart Nginx
+        include_role:
+         name: service_restart
+         tasks_from: restart
+        vars:
+          role_service_name: Nginx
+      - name: Nginx check
+        block:
+          - name: Check Nginx port status
+            include_role:
+             name: status_check
+             tasks_from: port_check
+            vars:
+             port: "{{ item }}"
+            with_items:
+             - 8000
+        rescue:
+          - name: Pagerduty escalation
+            include_role:
+             name: pd
+        _alerts
+             tasks_from: pd_noc
+            vars:
+             alert_name: "{{ alert }}"
+
+   - name: slack completion
+     include_role:
+      name: slack_notifications
+      tasks_from: completion
+     vars:
+      playbook: "{{ playbook_name }}"

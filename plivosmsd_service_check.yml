@@ -1,0 +1,64 @@
+---
+  - hosts: all
+    become: true
+    gather_facts: no
+    vars:
+     playbook_name: "test_plivosmsd_service_check"
+     alert: "plivosmsd_service_check"
+
+    pre_tasks:
+      - name: Verifying ansible_limit
+        assert:
+          that: ansible_limit != ""
+          fail_msg: "'limit' should not be blank"
+          success_msg: "'limit' is {{ ansible_limit }}"
+
+    tasks:
+      - name: slack execution
+        include_role:
+          name: slack_notifications
+          tasks_from: execution
+        vars:
+          playbook: "{{ playbook_name }}"
+          aws_token: "{{ lookup ('aws_secret', 'prod/devops/awx') }}"
+
+      - name: plivosmsd service check
+        block:
+          - name: plivosmsd_status
+            include_role:
+              name: status_check
+              tasks_from: service_check
+            vars:
+              role_service_name: plivosmsd
+        rescue:
+          - name: Restart plivosmsd
+            include_role:
+              name: service_restart
+              tasks_from: restart
+            vars:
+              role_service_name: plivosmsd
+
+          - name: Check plivosmsd status
+            block:
+              - name: plivosmsd_status
+                include_role:
+                  name: status_check
+                  tasks_from: service_check
+                vars:
+                  role_service_name: plivosmsd
+                register: result
+            rescue:
+              - name: Pagerduty escalation
+                include_role:
+                  name: pd_alerts
+                  tasks_from: pd_voice
+                vars:
+                  alert_name: "{{ alert }}"
+
+      - name: slack completion
+        include_role:
+          name: slack_notifications
+          tasks_from: completion
+        vars:
+          playbook: "{{ playbook_name }}"
+...
